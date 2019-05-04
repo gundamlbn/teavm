@@ -1,5 +1,5 @@
 /*
- *  Copyright 2016 Alexey Andreev.
+ *  Copyright 2019 konsoletyper.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,20 +17,10 @@ package org.teavm.metaprogramming.reflect;
 
 import org.teavm.metaprogramming.ReflectClass;
 
-public interface ReflectMethod extends ReflectParameterizedMember {
-    boolean isConstructor();
+public interface ReflectParameterizedType extends ReflectType {
+    ReflectTypeArgument[] getTypeArguments();
 
-    ReflectClass<?> getReturnType();
+    ReflectParameterizedType getOwnerType();
 
-    ReflectClass<?>[] getParameterTypes();
-
-    ReflectClass<?> getParameterType(int index);
-
-    ReflectAnnotatedElement getParameterAnnotations(int index);
-
-    int getParameterCount();
-
-    Object invoke(Object obj, Object... args);
-
-    Object construct(Object... args);
+    ReflectClass<?> getTypeConstructor();
 }

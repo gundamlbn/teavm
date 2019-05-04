@@ -18,9 +18,12 @@ package org.teavm.metaprogramming.impl.reflect;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Array;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -28,26 +31,30 @@ import org.teavm.metaprogramming.ReflectClass;
 import org.teavm.metaprogramming.impl.MetaprogrammingImpl;
 import org.teavm.metaprogramming.reflect.ReflectField;
 import org.teavm.metaprogramming.reflect.ReflectMethod;
+import org.teavm.metaprogramming.reflect.ReflectType;
 import org.teavm.model.AccessLevel;
 import org.teavm.model.ClassReader;
 import org.teavm.model.ElementModifier;
 import org.teavm.model.FieldReader;
+import org.teavm.model.GenericTypeParameter;
+import org.teavm.model.GenericValueType;
 import org.teavm.model.MethodDescriptor;
 import org.teavm.model.MethodReader;
 import org.teavm.model.ValueType;
 
-public class ReflectClassImpl<T> implements ReflectClass<T> {
+public class ReflectClassImpl<T> implements ReflectClass<T>, ReflectParameterizedMemberImpl {
     public final ValueType type;
     private ReflectContext context;
     public ClassReader classReader;
     private boolean resolved;
-    private Class<?> cls;
     private Map<String, ReflectFieldImpl> declaredFields = new HashMap<>();
     private ReflectField[] fieldsCache;
     private Map<MethodDescriptor, ReflectMethodImpl> methods = new HashMap<>();
     private Map<String, ReflectMethodImpl> declaredMethods = new HashMap<>();
     private ReflectMethod[] methodsCache;
     private ReflectAnnotatedElementImpl annotations;
+    private Map<String, ReflectTypeVariableImpl> typeVariableMap;
+    private String[] enumConstants;
 
     ReflectClassImpl(ValueType type, ReflectContext context) {
         this.type = type;
@@ -86,21 +93,22 @@ public class ReflectClassImpl<T> implements ReflectClass<T> {
         return classReader != null && classReader.readModifiers().contains(ElementModifier.ENUM);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
-    public T[] getEnumConstants() {
+    public String[] getEnumConstants() {
         resolve();
-        if (classReader == null) {
+        if (classReader == null || !classReader.hasModifier(ElementModifier.ENUM)) {
             return null;
         }
-        if (cls == null) {
-            try {
-                cls = Class.forName(classReader.getName(), true, context.getClassLoader());
-            } catch (ClassNotFoundException e) {
-                return null;
+        if (enumConstants == null) {
+            List<String> result = new ArrayList<>();
+            for (FieldReader field : classReader.getFields()) {
+                if (field.hasModifier(ElementModifier.ENUM)) {
+                    result.add(field.getName());
+                }
             }
+            enumConstants = result.toArray(new String[0]);
         }
-        return (T[]) cls.getEnumConstants();
+        return enumConstants;
     }
 
     @Override
@@ -157,13 +165,27 @@ public class ReflectClassImpl<T> implements ReflectClass<T> {
 
     @SuppressWarnings("unchecked")
     @Override
-    public ReflectClass<? super T> getSuperclass() {
+    public ReflectClassImpl<? super T> getSuperclass() {
         resolve();
-        if (classReader == null || classReader.getParent() == null
-                || classReader.getName().equals(classReader.getParent())) {
+        if (classReader == null || classReader.getParent() == null) {
             return null;
         }
-        return (ReflectClass<? super T>) context.getClass(new ValueType.Object(classReader.getParent()));
+        return (ReflectClassImpl<? super T>) context.getClass(new ValueType.Object(classReader.getParent()));
+    }
+
+    @Override
+    public ReflectType getGenericSuperclass() {
+        resolve();
+        if (classReader == null || classReader.getParent() == null) {
+            return null;
+        }
+
+        GenericValueType.Object genericParent = classReader.getGenericParent();
+        if (genericParent == null) {
+            return context.getRawGenericType(getSuperclass());
+        }
+
+        return context.getGenericType(genericParent, getTypeVariableMap());
     }
 
     @SuppressWarnings("unchecked")
@@ -176,6 +198,17 @@ public class ReflectClassImpl<T> implements ReflectClass<T> {
         return classReader.getInterfaces().stream()
                 .map(iface -> context.getClass(new ValueType.Object(iface)))
                 .toArray(sz -> (ReflectClass<? super T>[]) Array.newInstance(ReflectClassImpl.class, sz));
+    }
+
+    @Override
+    public ReflectType[] getGenericInterfaces() {
+        resolve();
+        if (classReader == null || classReader.getGenericInterfaces().isEmpty()) {
+            return ReflectContext.EMPTY_TYPES;
+        }
+        return classReader.getGenericInterfaces().stream()
+                .map(iface -> context.getGenericType(iface, getTypeVariableMap()))
+                .toArray(ReflectType[]::new);
     }
 
     @Override
@@ -424,5 +457,47 @@ public class ReflectClassImpl<T> implements ReflectClass<T> {
     @Override
     public Class<T> asJavaClass() {
         throw new IllegalStateException("Don't call this method from compile domain");
+    }
+
+    @Override
+    public Map<String, ReflectTypeVariableImpl> getTypeVariableMap() {
+        if (typeVariableMap == null) {
+            resolve();
+            GenericTypeParameter[] parameters = classReader.getGenericParameters();
+            if (parameters.length == 0) {
+                typeVariableMap = ReflectContext.EMPTY_TYPE_VARIABLES;
+            } else {
+                typeVariableMap = new LinkedHashMap<>();
+                for (GenericTypeParameter parameter : parameters) {
+                    GenericValueType.Reference[] interfaceBounds = parameter.getInterfaceBounds();
+                    GenericValueType.Reference classBound = parameter.getClassBound();
+                    GenericValueType.Reference[] bounds;
+                    if (classBound != null) {
+                        bounds = new GenericValueType.Reference[interfaceBounds.length + 1];
+                        bounds[0] = classBound;
+                        System.arraycopy(interfaceBounds, 0, bounds, 1, interfaceBounds.length);
+                    } else {
+                        bounds = interfaceBounds;
+                    }
+                    ReflectTypeVariableImpl variable = new ReflectTypeVariableImpl(context, this,
+                            parameter.getName(), bounds);
+                    typeVariableMap.put(parameter.getName(), variable);
+                }
+            }
+        }
+        return typeVariableMap;
+    }
+
+    @Override
+    public ReflectClassImpl<?> getDeclaringClass() {
+        resolve();
+        if (classReader == null) {
+            return null;
+        }
+        String ownerName = classReader.getOwnerName();
+        if (ownerName == null) {
+            return null;
+        }
+        return context.getClass(ValueType.object(ownerName));
     }
 }

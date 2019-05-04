@@ -1,5 +1,5 @@
 /*
- *  Copyright 2016 Alexey Andreev.
+ *  Copyright 2019 konsoletyper.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -13,24 +13,11 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-package org.teavm.metaprogramming.reflect;
+package org.teavm.metaprogramming.impl.reflect;
 
-import org.teavm.metaprogramming.ReflectClass;
+import java.util.Map;
+import org.teavm.metaprogramming.reflect.ReflectParameterizedMember;
 
-public interface ReflectMethod extends ReflectParameterizedMember {
-    boolean isConstructor();
-
-    ReflectClass<?> getReturnType();
-
-    ReflectClass<?>[] getParameterTypes();
-
-    ReflectClass<?> getParameterType(int index);
-
-    ReflectAnnotatedElement getParameterAnnotations(int index);
-
-    int getParameterCount();
-
-    Object invoke(Object obj, Object... args);
-
-    Object construct(Object... args);
+public interface ReflectParameterizedMemberImpl extends ReflectParameterizedMember {
+    Map<String, ReflectTypeVariableImpl> getTypeVariableMap();
 }
